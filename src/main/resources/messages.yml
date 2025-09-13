@@ -47,6 +47,10 @@ repaired-hand: "&7The item in your hand has been repaired."
 # When the player's inventory has been successfully repaired.
 repaired-all: "&7Your inventory has been repaired."
 
+# When /repair all runs but some damaged items were excluded by their settings.
+# Tip: You can inform players how to repair those items (e.g., with special tokens) if applicable.
+repaired-all-partial: "&7Your inventory has been repaired. &eHowever, some items were excluded from repair due to their settings."
+
 # If the item cannot be excluded from repair (not repairable).
 exclude-invalid: "&7You cannot exclude this item from repair."
 

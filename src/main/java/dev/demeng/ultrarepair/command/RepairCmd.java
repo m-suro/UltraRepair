@@ -136,7 +136,14 @@ public class RepairCmd {
       return;
     }
 
-    i.getRepairManager().repairAll(p);
-    Text.tell(p, i.getMessages().getString("repaired-all"));
+    final boolean hadExcluded = i.getRepairManager().repairAll(p);
+    String msg = i.getMessages().getString("repaired-all");
+    if (hadExcluded) {
+      final String partial = i.getMessages().getString("repaired-all-partial");
+      if (partial != null && !partial.isEmpty()) {
+        msg = partial;
+      }
+    }
+    Text.tell(p, msg);
   }
 }

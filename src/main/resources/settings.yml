@@ -55,3 +55,23 @@ cost-exceptions:
       DURABILITY: 1
       # Sharpness III
       DAMAGE_ALL: 3
+
+# Exclude certain items from being repaired based on Material + CustomModelData.
+# This is useful when you cannot add the ultrarepair:exclude NBT tag to those items.
+# Format:
+# exclude:
+#   MATERIAL_NAME:
+#     customdata:
+#       - 15155
+#       - 26262
+#       - 15152
+# Example configuration:
+exclude:
+  PAPER:
+    customdata:
+      - 15155
+      - 26262
+  STICK:
+    customdata:
+      - 6969
+      - 5959

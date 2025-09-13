@@ -1,24 +1,29 @@
 package dev.demeng.ultrarepair.manager;
 
+import com.sun.org.slf4j.internal.Logger;
 import dev.demeng.pluginbase.Common;
 import dev.demeng.pluginbase.Schedulers;
 import dev.demeng.pluginbase.Services;
 import dev.demeng.pluginbase.Sounds;
 import dev.demeng.pluginbase.lib.xseries.XSound;
 import dev.demeng.pluginbase.serialize.ItemSerializer;
+import dev.demeng.pluginbase.text.Text;
 import dev.demeng.ultrarepair.UltraRepair;
 import io.github.bananapuncher714.nbteditor.NBTEditor;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import net.milkbowl.vault.economy.Economy;
 import org.bukkit.Material;
 import org.bukkit.Sound;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
 
 public class RepairManager {
 
@@ -30,6 +35,7 @@ public class RepairManager {
   private final UltraRepair i;
   private final Map<Player, Long> cooldowns = new HashMap<>();
   private final Map<ItemStack, Double> costExceptions = new HashMap<>();
+  private final Map<Material, Set<Integer>> excludedModelData = new HashMap<>();
 
   private long handCooldown;
   private long allCooldown;
@@ -46,6 +52,7 @@ public class RepairManager {
   public void reload() {
 
     costExceptions.clear();
+    excludedModelData.clear();
 
     this.handCooldown = i.getSettings().getLong("cooldown.hand") * 1000L;
     this.allCooldown = i.getSettings().getLong("cooldown.all") * 1000L;
@@ -60,6 +67,21 @@ public class RepairManager {
       costExceptions.put(ItemSerializer.deserialize(
               Objects.requireNonNull(section.getConfigurationSection(key))),
           section.getDouble(key + ".cost"));
+    }
+
+    // Load exclusion by CustomModelData
+    final ConfigurationSection excludeSec = i.getSettings().getConfigurationSection("exclude");
+    if (excludeSec != null) {
+      for (String matName : excludeSec.getKeys(false)) {
+        Material mat = Material.matchMaterial(matName);
+        if (mat == null) {
+          continue;
+        }
+        final List<Integer> list = excludeSec.getIntegerList(matName + ".customdata");
+        if (list != null && !list.isEmpty()) {
+          excludedModelData.put(mat, new HashSet<>(list));
+        }
+      }
     }
 
     this.handSound = XSound.matchXSound(Objects.requireNonNull(
@@ -103,7 +125,33 @@ public class RepairManager {
       return false;
     }
 
-    return NBTEditor.contains(stack, EXCLUDE_NBT_TAG);
+    // Check legacy NBT exclusion tag first
+    if (NBTEditor.contains(stack, EXCLUDE_NBT_TAG)) {
+      return true;
+    }
+
+    // Check exclusion by CustomModelData from config
+    final Set<Integer> excluded = excludedModelData.get(stack.getType());
+    if (excluded == null || excluded.isEmpty()) {
+      return false;
+    }
+
+    final ItemMeta meta = stack.getItemMeta();
+    if (meta == null) {
+      return false;
+    }
+
+    try {
+      if (meta.hasCustomModelData()) {
+        final int cmd = meta.getCustomModelData();
+        return excluded.contains(cmd);
+      }
+    } catch (NoSuchMethodError ignored) {
+      // Running on an API version without CustomModelData support
+      return false;
+    }
+
+    return false;
   }
 
   public ItemStack addExclusionTag(ItemStack stack) {
@@ -194,7 +242,7 @@ public class RepairManager {
     double cost = defaultCost;
 
     for (Map.Entry<ItemStack, Double> entry : costExceptions.entrySet()) {
-      if (entry.getKey().isSimilar(copy)) {
+      if (isSimilar(entry.getKey(), copy)) {
         cost = entry.getValue();
         break;
       }
@@ -203,7 +251,30 @@ public class RepairManager {
     return (cost + (stack.getDurability() * durabilityCostMultiplier)) * stack.getAmount();
   }
 
-  public double calculateInventoryCost(Player p) {
+    private boolean isSimilar(ItemStack item1, ItemStack item2 ) {
+        if(item1 == null || item2 == null) return false;
+        if(!item1.getType().equals(item2.getType())) return false;
+
+        ItemStack copy1 = item1.clone();
+        ItemStack copy2 = item2.clone();
+        copy1.setAmount(1);
+        copy2.setAmount(1);
+        ItemMeta meta1 = copy1.getItemMeta();
+        ItemMeta meta2 = copy2.getItemMeta();
+
+        if(meta1 == null || meta2 == null) return meta1 == meta2;
+
+        if(!Objects.equals(meta1.getDisplayName(), meta2.getDisplayName())) return false;
+        if(!Objects.equals(meta1.getLore(), meta2.getLore())) return false;
+        if(!Objects.equals(meta1.getEnchants(), meta2.getEnchants())) return false;
+        if(meta1.hasCustomModelData() != meta2.hasCustomModelData()) return false;
+        if(meta1.hasCustomModelData() && meta1.getCustomModelData() != meta2.getCustomModelData()) return false;
+
+        return true;
+    }
+
+
+    public double calculateInventoryCost(Player p) {
 
     double cost = 0;
 
@@ -232,7 +303,7 @@ public class RepairManager {
   }
 
   // Does not check for preconditions.
-  public void repairAll(Player p) {
+  public boolean repairAll(Player p) {
 
     cooldowns.put(p, System.currentTimeMillis() + allCooldown);
     Schedulers.sync().runLater(() -> cooldowns.remove(p), allCooldown / 50L);
@@ -242,13 +313,18 @@ public class RepairManager {
       eco.withdrawPlayer(p, calculateInventoryCost(p));
     }
 
+    boolean hadExcludedDamaged = false;
+
     for (ItemStack stack : getInventoryContents(p)) {
       if (isRepairable(stack)) {
         stack.setDurability((short) 0);
+      } else if (stack != null && isPotentiallyRepairable(stack) && stack.getDurability() != 0 && hasExclusionTag(stack)) {
+        hadExcludedDamaged = true;
       }
     }
 
     Sounds.playVanillaToPlayer(p, allSound, 1F, 1F);
+    return hadExcludedDamaged;
   }
 
   public static boolean isBypassingCost(Player p) {
