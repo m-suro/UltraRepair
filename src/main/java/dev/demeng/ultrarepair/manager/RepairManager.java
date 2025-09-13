@@ -21,6 +21,7 @@ import net.milkbowl.vault.economy.Economy;
 import org.bukkit.Material;
 import org.bukkit.Sound;
 import org.bukkit.configuration.ConfigurationSection;
+import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
@@ -242,7 +243,7 @@ public class RepairManager {
     double cost = defaultCost;
 
     for (Map.Entry<ItemStack, Double> entry : costExceptions.entrySet()) {
-      if (isSimilar(entry.getKey(), copy)) {
+      if (isBasedOn(copy, entry.getKey())) {
         cost = entry.getValue();
         break;
       }
@@ -251,9 +252,17 @@ public class RepairManager {
     return (cost + (stack.getDurability() * durabilityCostMultiplier)) * stack.getAmount();
   }
 
-    private boolean isSimilar(ItemStack item1, ItemStack item2 ) {
-        if(item1 == null || item2 == null) return false;
-        if(!item1.getType().equals(item2.getType())) return false;
+    /**
+     * Checks if an item (item1) is based on another item (item2)
+     * So if item1 has displayName but the 2nd doesnt - it is based on item2
+     * But if item2 has lore and item1 doesnt - it is not based on item2
+     * @param item1
+     * @param item2
+     * @return
+     */
+    private boolean isBasedOn(ItemStack item1, ItemStack item2) {
+        if (item1 == null || item2 == null) return false;
+        if (!item1.getType().equals(item2.getType())) return false;
 
         ItemStack copy1 = item1.clone();
         ItemStack copy2 = item2.clone();
@@ -262,16 +271,32 @@ public class RepairManager {
         ItemMeta meta1 = copy1.getItemMeta();
         ItemMeta meta2 = copy2.getItemMeta();
 
-        if(meta1 == null || meta2 == null) return meta1 == meta2;
+        if (meta2 == null) return meta1 == null;
 
-        if(!Objects.equals(meta1.getDisplayName(), meta2.getDisplayName())) return false;
-        if(!Objects.equals(meta1.getLore(), meta2.getLore())) return false;
-        if(!Objects.equals(meta1.getEnchants(), meta2.getEnchants())) return false;
-        if(meta1.hasCustomModelData() != meta2.hasCustomModelData()) return false;
-        if(meta1.hasCustomModelData() && meta1.getCustomModelData() != meta2.getCustomModelData()) return false;
+        // Display Name
+        String name2 = meta2.hasDisplayName() ? meta2.getDisplayName() : null;
+        String name1 = meta1.hasDisplayName() ? meta1.getDisplayName() : null;
+        if (name2 != null && !Objects.equals(name2, name1)) return false;
+
+        // Lore
+        List<String> lore2 = meta2.hasLore() ? meta2.getLore() : null;
+        List<String> lore1 = meta1.hasLore() ? meta1.getLore() : null;
+        if (lore2 != null && !Objects.equals(lore2, lore1)) return false;
+
+        // Enchants
+        Map<Enchantment, Integer> ench2 = meta2.getEnchants();
+        Map<Enchantment, Integer> ench1 = meta1.getEnchants();
+        if (!ench2.isEmpty() && !Objects.equals(ench2, ench1)) return false;
+
+        // Custom Model Data
+        if (meta2.hasCustomModelData()) {
+            if (!meta1.hasCustomModelData() || meta1.getCustomModelData() != meta2.getCustomModelData())
+                return false;
+        }
 
         return true;
     }
+
 
 
     public double calculateInventoryCost(Player p) {
